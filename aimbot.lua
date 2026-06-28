@@ -1,215 +1,172 @@
 --[[
-    PRO AIMBOT V4 - Camera di chuyển theo đầu địch khi trong vòng tròn
-    Delta Executor - Hoạt động chính xác
+    CLEAN AIMBOT - No GUI, FOV Circle Only
+    Delta Executor Compatible
 --]]
 
--- Services
+-- ============================================
+-- SETTINGS - EDIT HERE
+-- ============================================
+local ENABLED = true                    -- true = on, false = off
+local AIM_KEY = Enum.KeyCode.Q         -- nil = always on
+local AIM_PART = "Head"                -- "Head" or "HumanoidRootPart"
+local SMOOTHNESS = 0.06                -- 0.01 (snappy) - 1 (smooth)
+local FOV_SIZE = 130                   -- circle radius in pixels
+local FOV_COLOR = Color3.fromRGB(255, 255, 255)
+local FOV_LOCKED_COLOR = Color3.fromRGB(255, 50, 50)
+local FOV_ALPHA = 0.6
+local WALL_CHECK = true
+local TEAM_CHECK = true
+local ALIVE_CHECK = true
+
+-- ============================================
+-- SERVICES
+-- ============================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
-local UserInputService = game:GetService("UserInputService")
-
--- Settings
-local FOV = 120 -- Kích thước vòng tròn (pixel)
-local Smoothness = 0.08 -- Độ mượt (0-1, càng thấp càng nhanh)
-local AimPart = "Head" -- Head hoặc HumanoidRootPart
-local VisibleCheck = true -- Kiểm tra tường
-local TeamCheck = true -- Không aim đồng đội
 
 -- ============================================
--- TẠO VÒNG TRÒN FOV GIỮA MÀN HÌNH
+-- FOV CIRCLE (NO GUI BUTTONS)
 -- ============================================
-local FOVGui = Instance.new("ScreenGui")
-FOVGui.Name = "AimbotFOV"
-FOVGui.Parent = game:GetService("CoreGui")
-FOVGui.ResetOnSpawn = false
-FOVGui.IgnoreGuiInset = true
-FOVGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+local Gui = Instance.new("ScreenGui")
+Gui.Parent = game:GetService("CoreGui")
+Gui.ResetOnSpawn = false
+Gui.IgnoreGuiInset = true
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 local Circle = Instance.new("Frame")
-Circle.Size = UDim2.new(0, FOV * 2, 0, FOV * 2)
-Circle.Position = UDim2.new(0.5, -FOV, 0.5, -FOV)
-Circle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-Circle.BackgroundTransparency = 0.85
+Circle.Size = UDim2.new(0, FOV_SIZE * 2, 0, FOV_SIZE * 2)
+Circle.Position = UDim2.new(0.5, -FOV_SIZE, 0.5, -FOV_SIZE)
+Circle.BackgroundColor3 = FOV_COLOR
+Circle.BackgroundTransparency = 0.9
 Circle.BorderSizePixel = 0
-Circle.Parent = FOVGui
-
-local CircleCorner = Instance.new("UICorner")
-CircleCorner.CornerRadius = UDim.new(1, 0)
-CircleCorner.Parent = Circle
+Circle.Parent = Gui
+Instance.new("UICorner", Circle).CornerRadius = UDim.new(1, 0)
 
 local Stroke = Instance.new("UIStroke")
 Stroke.Thickness = 2
-Stroke.Color = Color3.fromRGB(255, 255, 255)
-Stroke.Transparency = 0.4
+Stroke.Color = FOV_COLOR
+Stroke.Transparency = FOV_ALPHA
 Stroke.Parent = Circle
 
 -- ============================================
--- KIỂM TRA TƯỜNG BẰNG RAYCAST
+-- HELPERS
 -- ============================================
-local function IsWallBetween(targetPos)
+local function wallCheck(targetPos)
+    if not WALL_CHECK then return false end
     local char = LocalPlayer.Character
     if not char then return true end
-    
-    local head = char:FindFirstChild("Head")
+    local head = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
     if not head then return true end
-    
+
     local rayParams = RaycastParams.new()
     rayParams.FilterDescendantsInstances = {char}
     rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-    
     local dir = (targetPos - head.Position).Unit
     local dist = (targetPos - head.Position).Magnitude
-    
     local ray = Workspace:Raycast(head.Position, dir * dist, rayParams)
-    
+
     if ray then
-        local hitParent = ray.Instance
-        -- Kiểm tra xem ray có trúng chính target character không
-        local targetChar = nil
-        for _, player in pairs(Players:GetPlayers()) do
-            if player.Character and ray.Instance:IsDescendantOf(player.Character) then
-                targetChar = player.Character
-                break
+        for _, plr in pairs(Players:GetPlayers()) do
+            if plr.Character and ray.Instance:IsDescendantOf(plr.Character) then
+                return false
             end
         end
-        if targetChar then
-            return false -- Trúng người chơi, không phải tường
-        end
-        return true -- Trúng tường
+        return true
     end
-    
-    return false -- Không trúng gì
+    return false
 end
 
--- ============================================
--- TÌM ĐẦU ĐỊCH GẦN TÂM NHẤT TRONG FOV
--- ============================================
-local function GetTargetInFOV()
+local function isAlive(part)
+    if not ALIVE_CHECK then return true end
+    if not part or not part.Parent then return false end
+    local hum = part.Parent:FindFirstChild("Humanoid")
+    return hum and hum.Health > 0
+end
+
+local function getTarget()
     local char = LocalPlayer.Character
     if not char then return nil end
-    
-    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    local bestTarget = nil
-    local bestDist = FOV + 1
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local best, bestDist = nil, FOV_SIZE + 1
 
-    for _, player in pairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        
-        local targetChar = player.Character
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr == LocalPlayer then continue end
+        local targetChar = plr.Character
         if not targetChar then continue end
-        
-        local humanoid = targetChar:FindFirstChild("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then continue end
-        
-        -- Team check
-        if TeamCheck and LocalPlayer.Team and player.Team == LocalPlayer.Team then
-            continue
-        end
-        
-        -- Lấy phần cần aim
-        local targetPart
-        if AimPart == "Head" then
-            targetPart = targetChar:FindFirstChild("Head")
-        else
-            targetPart = targetChar:FindFirstChild("HumanoidRootPart")
-        end
-        
-        if not targetPart then continue end
-        
-        -- Lấy vị trí 2D trên màn hình
-        local screenPos, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
-        
-        if onScreen then
-            local distFromCenter = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
-            
-            -- Trong vòng tròn FOV?
-            if distFromCenter <= FOV then
-                -- Wall check
-                if VisibleCheck and IsWallBetween(targetPart.Position) then
-                    continue
-                end
-                
-                -- Chọn mục tiêu gần tâm nhất
-                if distFromCenter < bestDist then
-                    bestDist = distFromCenter
-                    bestTarget = targetPart
-                end
-            end
+        if TEAM_CHECK and LocalPlayer.Team and plr.Team == LocalPlayer.Team then continue end
+        local part = targetChar:FindFirstChild(AIM_PART)
+        if not part then continue end
+        if not isAlive(part) then continue end
+
+        local sp, onScreen = Camera:WorldToScreenPoint(part.Position)
+        if not onScreen then continue end
+        local dist = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+        if dist > FOV_SIZE then continue end
+        if wallCheck(part.Position) then continue end
+
+        if dist < bestDist then
+            bestDist = dist
+            best = part
         end
     end
-    
-    return bestTarget
+    return best
 end
 
 -- ============================================
--- AIMBOT LOOP - DI CHUYỂN CAMERA THEO ĐẦU
+-- AIMBOT LOOP
 -- ============================================
-local CurrentTarget = nil
+local target = nil
 
-RunService.RenderStepped:Connect(function(deltaTime)
-    local target = GetTargetInFOV()
-    
-    if target then
-        CurrentTarget = target
-        
-        -- Đổi màu vòng tròn -> ĐỎ
-        Stroke.Color = Color3.fromRGB(255, 30, 30)
+RunService.RenderStepped:Connect(function()
+    if not ENABLED then
+        Stroke.Color = FOV_COLOR
+        Stroke.Transparency = FOV_ALPHA
+        Circle.BackgroundColor3 = FOV_COLOR
+        Circle.BackgroundTransparency = 0.9
+        target = nil
+        return
+    end
+
+    local aiming = (AIM_KEY and UserInputService:IsKeyDown(AIM_KEY)) or (not AIM_KEY)
+    if not aiming then
+        Stroke.Color = FOV_COLOR
+        Stroke.Transparency = FOV_ALPHA
+        Circle.BackgroundColor3 = FOV_COLOR
+        Circle.BackgroundTransparency = 0.9
+        target = nil
+        return
+    end
+
+    target = getTarget()
+
+    if target and isAlive(target) then
+        Stroke.Color = FOV_LOCKED_COLOR
         Stroke.Transparency = 0.2
-        Circle.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-        Circle.BackgroundTransparency = 0.75
-        
-        -- TÍNH TOÁN CAMERA DI CHUYỂN THEO ĐẦU
-        local cameraPos = Camera.CFrame.Position
-        local targetPos = target.Position
-        
-        -- Tạo CFrame mới: vị trí camera giữ nguyên, hướng nhìn vào đầu
-        local newLookVector = (targetPos - cameraPos).Unit
-        local newCFrame = CFrame.new(cameraPos, cameraPos + newLookVector)
-        
-        -- Lerp mượt
-        Camera.CFrame = Camera.CFrame:Lerp(newCFrame, Smoothness)
-        
-    else
-        CurrentTarget = nil
-        
-        -- Reset màu trắng
-        Stroke.Color = Color3.fromRGB(255, 255, 255)
-        Stroke.Transparency = 0.4
-        Circle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        Circle.BackgroundColor3 = FOV_LOCKED_COLOR
         Circle.BackgroundTransparency = 0.85
+
+        local camPos = Camera.CFrame.Position
+        local dir = (target.Position - camPos).Unit
+        local goal = CFrame.new(camPos, camPos + dir)
+        Camera.CFrame = Camera.CFrame:Lerp(goal, SMOOTHNESS)
+    else
+        Stroke.Color = FOV_COLOR
+        Stroke.Transparency = FOV_ALPHA
+        Circle.BackgroundColor3 = FOV_COLOR
+        Circle.BackgroundTransparency = 0.9
+        target = nil
     end
 end)
 
 -- ============================================
--- THẢ MỤC TIÊU KHI CHẾT
+-- CLEANUP ON RESPAWN
 -- ============================================
-coroutine.wrap(function()
-    while task.wait(0.3) do
-        if CurrentTarget then
-            local parent = CurrentTarget.Parent
-            if not parent then
-                CurrentTarget = nil
-            else
-                local hum = parent:FindFirstChild("Humanoid")
-                if not hum or hum.Health <= 0 then
-                    CurrentTarget = nil
-                end
-            end
-        end
-    end
-end)()
+LocalPlayer.CharacterAdded:Connect(function()
+    target = nil
+end)
 
--- ============================================
--- THÔNG BÁO
--- ============================================
-print("=================================")
-print("🎯 AIMBOT V4 ACTIVATED!")
-print("✅ Vòng tròn: " .. FOV .. "px")
-print("✅ Aim: " .. AimPart)
-print("✅ Wall Check: " .. tostring(VisibleCheck))
-print("✅ Team Check: " .. tostring(TeamCheck))
-print("✅ Camera di chuyển theo đầu địch")
-print("=================================")
+print("Aimbot Ready | FOV: " .. FOV_SIZE .. "px | Key: " .. (AIM_KEY and tostring(AIM_KEY) or "Always"))
