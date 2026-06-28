@@ -1,7 +1,9 @@
 --[[
-    INF JUMP GUI - Small & Draggable
+    INF JUMP GUI - Small, Draggable, Stable
     Red = OFF | Green = ON
-    Delta Executor Compatible
+    Works after death/respawn
+    PC & Mobile compatible
+    Delta Executor
 --]]
 
 -- Services
@@ -22,58 +24,79 @@ Gui.Parent = game:GetService("CoreGui")
 Gui.ResetOnSpawn = false
 Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
--- Main frame (draggable)
-local Frame = Instance.new("TextButton")
-Frame.Size = UDim2.new(0, 100, 0, 40)
-Frame.Position = UDim2.new(0, 10, 0, 10)
-Frame.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Red = OFF
-Frame.BorderSizePixel = 0
-Frame.Text = "INF JUMP: OFF"
-Frame.TextColor3 = Color3.fromRGB(255, 255, 255)
-Frame.TextSize = 14
-Frame.Font = Enum.Font.GothamBold
-Frame.AutoButtonColor = false
-Frame.Draggable = true
-Frame.Parent = Gui
+-- Main button (draggable)
+local Button = Instance.new("TextButton")
+Button.Size = UDim2.new(0, 110, 0, 40)
+Button.Position = UDim2.new(0, 10, 0, 10)
+Button.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Red = OFF
+Button.BorderSizePixel = 0
+Button.Text = "INF JUMP: OFF"
+Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+Button.TextSize = 14
+Button.Font = Enum.Font.GothamBold
+Button.AutoButtonColor = false
+Button.Draggable = true
+Button.Parent = Gui
 
-Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 8)
+Instance.new("UICorner", Button).CornerRadius = UDim.new(0, 8)
 
 -- ============================================
--- INF JUMP LOGIC
+-- INF JUMP FUNCTION
 -- ============================================
-local function EnableInfJump()
-    InfJumpEnabled = true
-    Frame.BackgroundColor3 = Color3.fromRGB(40, 180, 60) -- Green = ON
-    Frame.Text = "INF JUMP: ON"
+local function DoJump()
+    local char = LocalPlayer.Character
+    if not char then return end
     
-    JumpConnection = UserInputService.JumpRequest:Connect(function()
-        if InfJumpEnabled then
-            local char = LocalPlayer.Character
-            if char then
-                local humanoid = char:FindFirstChild("Humanoid")
-                if humanoid and humanoid:GetState() ~= Enum.HumanoidStateType.Freefall then
-                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-                end
-            end
-        end
-    end)
+    local humanoid = char:FindFirstChild("Humanoid")
+    if not humanoid then return end
+    
+    -- Only jump if not already in a state that prevents jumping
+    local state = humanoid:GetState()
+    if state == Enum.HumanoidStateType.Dead then return end
+    if state == Enum.HumanoidStateType.Physics then return end
+    
+    -- Force jump
+    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 end
 
-local function DisableInfJump()
-    InfJumpEnabled = false
-    Frame.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Red = OFF
-    Frame.Text = "INF JUMP: OFF"
-    
+-- ============================================
+-- SETUP JUMP CONNECTION
+-- ============================================
+local function SetupJumpConnection()
+    -- Disconnect old connection if exists
     if JumpConnection then
         JumpConnection:Disconnect()
         JumpConnection = nil
     end
+    
+    -- Create new connection
+    JumpConnection = UserInputService.JumpRequest:Connect(function()
+        if InfJumpEnabled then
+            DoJump()
+        end
+    end)
+end
+
+-- ============================================
+-- ENABLE / DISABLE
+-- ============================================
+local function EnableInfJump()
+    InfJumpEnabled = true
+    Button.BackgroundColor3 = Color3.fromRGB(40, 180, 60) -- Green = ON
+    Button.Text = "INF JUMP: ON"
+    SetupJumpConnection()
+end
+
+local function DisableInfJump()
+    InfJumpEnabled = false
+    Button.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Red = OFF
+    Button.Text = "INF JUMP: OFF"
 end
 
 -- ============================================
 -- BUTTON CLICK
 -- ============================================
-Frame.MouseButton1Click:Connect(function()
+Button.MouseButton1Click:Connect(function()
     if InfJumpEnabled then
         DisableInfJump()
     else
@@ -82,31 +105,26 @@ Frame.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================
--- RESPAWN HANDLER
+-- RESPAWN HANDLER - Reconnect after death
 -- ============================================
-LocalPlayer.CharacterAdded:Connect(function()
+LocalPlayer.CharacterAdded:Connect(function(char)
+    -- Wait for character to fully load
+    task.wait(0.2)
+    
+    -- If inf jump is enabled, reconnect the jump listener
     if InfJumpEnabled then
-        -- Reconnect after respawn
-        if JumpConnection then
-            JumpConnection:Disconnect()
-        end
-        JumpConnection = UserInputService.JumpRequest:Connect(function()
-            if InfJumpEnabled then
-                local char = LocalPlayer.Character
-                if char then
-                    local humanoid = char:FindFirstChild("Humanoid")
-                    if humanoid and humanoid:GetState() ~= Enum.HumanoidStateType.Freefall then
-                        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-                    end
-                end
-            end
-        end)
+        SetupJumpConnection()
     end
 end)
 
 -- ============================================
 -- INIT
 -- ============================================
-print("✅ Inf Jump GUI Loaded")
-print("📌 Red = OFF | Green = ON")
-print("🖱️ Drag to move | Click to toggle")
+print("=================================")
+print("✅ INF JUMP LOADED")
+print("🔴 Red = OFF")
+print("🟢 Green = ON")
+print("🖱️ Drag to move")
+print("📱 PC & Mobile supported")
+print("🔄 Works after respawn")
+print("=================================")
